@@ -1,55 +1,61 @@
 package main
 
 import (
+	"log"
+	"net"
 	"net/http"
+
+	"github.com/fauxriarty/fuckit/chatroom"
+	"github.com/fauxriarty/fuckit/client"
+	"github.com/fauxriarty/fuckit/message"
 	"github.com/gin-gonic/gin"
 )
 
-var db = make(map[string]string)
-
-func setupRouter() *gin.Engine {
-	r := gin.Default()
-
-	// Ping test
-	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "Shut the fuck up")
+func Status(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"message": "WOOOOHOOOOOO",
 	})
-
-	// Get user value
-	r.GET("/user/:name", func(c *gin.Context) {
-		user := c.Params.ByName("name")
-		value, ok := db[user]
-		if ok {
-			c.JSON(http.StatusOK, gin.H{"user": user, "value": value})
-		} else {
-			c.JSON(http.StatusOK, gin.H{"user": user, "status": "no value"})
-		}
-	})
-
-	authorized := r.Group("/", gin.BasicAuth(gin.Accounts{
-		"foo":  "bar", // user:foo password:bar
-		"manu": "123", // user:manu password:123
-	}))
-
-	authorized.POST("admin", func(c *gin.Context) {
-		user := c.MustGet(gin.AuthUserKey).(string)
-
-		// Parse JSON
-		var json struct {
-			Value string `json:"value" binding:"required"`
-		}
-
-		if c.Bind(&json) == nil {
-			db[user] = json.Value
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
-		}
-	})
-
-	return r
 }
 
 func main() {
-	r := setupRouter()
-	// Listen and Server in 0.0.0.0:8080
-	r.Run(":8080")
+
+	// router := gin.Default()
+
+	chatroom := &chatroom.Chatroom{
+		Broadcast:  make(chan *message.Message),
+		Register:   make(chan *client.Client),
+		Unregister: make(chan *client.Client),
+		Clients:    make(map[*client.Client]bool),
+	}
+
+	go chatroom.Run()
+
+	// router.GET("/", Status)
+
+	http.HandleFunc("/ws", chatroom.HandleConnections)
+
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var ip string
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ip = ipnet.IP.String()
+				break
+			}
+		}
+	}
+
+	if ip == "" {
+		log.Fatal("No IP found")
+	}
+
+	log.Println("http server started on " + ip + ":8080")
+	err = http.ListenAndServe(":8080", nil)
+	if err != nil {
+		log.Fatal("ListenAndServe: ", err)
+	}
 }
