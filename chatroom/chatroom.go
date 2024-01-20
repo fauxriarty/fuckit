@@ -49,18 +49,19 @@ func (c *Chatroom) Run() {
 	}
 }
 
-func (c *Chatroom) HandleConnections(w http.ResponseWriter, r *http.Request) {
+func (c *Chatroom) HandleConnections(w http.ResponseWriter, r *http.Request) error {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v\n", err)
-		return
+		return err
 	}
 
-	client := &client.Client{Conn: conn, Send: make(chan *message.Message, 256)} // Added buffer to the channel
+	client := &client.Client{Conn: conn, Send: make(chan *message.Message, 256)}
 	c.Register <- client
 
 	log.Printf("Handling connections for client: %v\n", client)
 	go c.HandleMessages(client)
+	return nil
 }
 
 func (c *Chatroom) HandleMessages(client *client.Client) {
@@ -74,7 +75,11 @@ func (c *Chatroom) HandleMessages(client *client.Client) {
 		message := &message.Message{}
 		err := client.Conn.ReadJSON(message)
 		if err != nil {
-			log.Printf("Error reading JSON from client: %v, error: %v\n", client, err)
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+				log.Printf("Client %v closed the connection\n", client)
+			} else {
+				log.Printf("Error reading JSON from client: %v, error: %v\n", client, err)
+			}
 			break
 		}
 
