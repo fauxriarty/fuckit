@@ -24,7 +24,7 @@ func (c *Client) ReadPump(server *Server) {
 			log.Println("Error on message read:", err)
 			break
 		}
-		server.broadcast <- message
+		server.broadcast <- Message{Data: message, Sender: c}
 	}
 }
 
@@ -51,7 +51,13 @@ type Server struct {
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
-	broadcast  chan []byte
+	//broadcast  chan []byte
+	broadcast chan Message
+}
+
+type Message struct {
+	Data   []byte
+	Sender *Client
 }
 
 var upgrader = websocket.Upgrader{
@@ -60,17 +66,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// NewServer creates a new Server instance
 func NewServer() *Server {
 	return &Server{
-		broadcast:  make(chan []byte),
+		broadcast:  make(chan Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
 	}
 }
 
-// Run starts the server
 func (server *Server) Run() {
 	for {
 		select {
@@ -81,20 +85,21 @@ func (server *Server) Run() {
 				delete(server.clients, client)
 				close(client.Send)
 			}
-		case message := <-server.broadcast:
+		case msg := <-server.broadcast:
 			for client := range server.clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
-					delete(server.clients, client)
+				if client != msg.Sender { // skip sending message to the sender
+					select {
+					case client.Send <- msg.Data:
+					default:
+						close(client.Send)
+						delete(server.clients, client)
+					}
 				}
 			}
 		}
 	}
 }
 
-// ServeWs handles new WebSocket requests
 func ServeWs(server *Server, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -104,7 +109,7 @@ func ServeWs(server *Server, w http.ResponseWriter, r *http.Request) {
 	client := &Client{Conn: conn, Send: make(chan []byte, 256)}
 	server.register <- client
 
-	// Start a new goroutine for each client
+	// starts a new goroutine for each client
 	go client.ReadPump(server)
 	go client.WritePump()
 }
