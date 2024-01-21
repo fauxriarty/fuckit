@@ -155,7 +155,11 @@ func main() {
 
 	go chatroom.Run()
 
-	http.HandleFunc("/ws", chatroom.HandleConnections)
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if err := chatroom.HandleConnections(w, r); err != nil {
+			log.Printf("Error handling connection: %v\n", err)
+		}
+	})
 
 	log.Println("Chat server started on :8080")
 	err := http.ListenAndServe(":8080", nil)
